@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>A small introduction to three.js webgl [1]</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+    />
+    <link rel="stylesheet" href="css/styleQ3.css" />
+
+    <script src="./three.js"></script>
+    <script src="./js/Detector.js"></script>
+    <script>
+      /**
+       * A simple implementation of Tetris.
+       * @version 0.1.8
+       * @author Denis Khakimov <denisdude@gmail.com>
+       */
+
+      let PAUSE_RENDER = 40;
+      let PAUSE_GAME_STEP = 25;
+      const PAUSE_MOVE_DOWN_BASE = 240;
+      let PAUSE_MOVE_DOWN = PAUSE_MOVE_DOWN_BASE * 1;
+      let COLS = 14;
+      let ROWS = 26;
+
+      const init = (event) => {
+        const game = new Game(COLS, ROWS, FIGURES_ARRAY);
+        let stats = new Stats();
+        game.setStats(stats);
+        game.setRenderer(new Three3DRenderer(document.getElementById("board")));
+        game.setFigures(FIGURES_ARRAY);
+
+        const statsPanel = document.querySelector("#stats");
+
+        let lastTime = Date.now();
+        let renderDeltaTime = 0;
+        let stepDeltaTime = 0;
+        let moveDownDeltaTime = 0;
+        const tick = () => {
+          renderDeltaTime += Date.now() - lastTime;
+          stepDeltaTime += Date.now() - lastTime;
+          moveDownDeltaTime += Date.now() - lastTime;
+          lastTime = Date.now();
+
+          if (renderDeltaTime >= PAUSE_RENDER) {
+            renderDeltaTime = 0;
+
+            const statsHtml = [];
+            statsHtml.push(`Score: ${stats.score}`);
+            statsHtml.push(`Lines: ${stats.fullLines}`);
+            statsHtml.push(`Figures: ${stats.figures}`);
+            statsHtml.push(`Speed: ${(1000 / PAUSE_MOVE_DOWN).toFixed(2)}`);
+            statsPanel.innerHTML = statsHtml.join("<hr/>");
+            const speedMultiplier = Math.ceil(stats.score / 1000) / 20;
+            PAUSE_MOVE_DOWN = PAUSE_MOVE_DOWN_BASE * (1 - speedMultiplier);
+
+            //game.render();
+          }
+          if (stepDeltaTime >= PAUSE_GAME_STEP) {
+            stepDeltaTime = 0;
+            game.step();
+            game.forceRender();
+          }
+          if (moveDownDeltaTime >= PAUSE_MOVE_DOWN) {
+            moveDownDeltaTime = 0;
+            game.nextMove();
+            game.forceRender();
+          }
+
+          requestAnimationFrame(tick);
+        };
+
+        window.addEventListener("keydown", (e) => {
+          //console.log(e.code)
+          switch (e.code) {
+            case "ArrowLeft":
+            case "KeyA":
+              game.moveLeft();
+              break;
+            case "ArrowRight":
+            case "KeyD":
+              game.moveRight();
+              break;
+            case "ArrowDown":
+            case "KeyS":
+              game.moveDown();
+              break;
+            case "ArrowUp":
+            case "KeyW":
+            case "Space":
+              game.turnClockWise();
+              break;
+            case "ShiftLeft":
+            case "ShiftRight":
+              game.turnCounterClockWise();
+              break;
+            default:
+              break;
+          }
+        });
+
+        // UI -- begin
+        const gamestart = document.querySelector("button[name=gamestart]");
+        gamestart.addEventListener("click", (e) => {
+          game.play();
+        });
+        const gamestop = document.querySelector("button[name=gamestop]");
+        gamestop.addEventListener("click", (e) => {
+          game.stop();
+        });
+        const gamereset = document.querySelector("button[name=gamereset]");
+        gamereset.addEventListener("click", (e) => {
+          game.reset();
+        });
+        const statsreset = document.querySelector("button[name=statsreset]");
+        statsreset.addEventListener("click", (e) => {
+          stats.reset();
+        });
+        const selectrenderer = document.querySelector("select[name=renderer]");
+        selectrenderer.addEventListener("change", (e) => {
+          // try to get an instance of a class by its name
+          const className = e.target.value;
+          const fn = new Function("obj", `return new ${className}(obj)`);
+          const renderer = fn(document.getElementById("board"));
+
+          game.stop();
+          game.renderer.destroy(); // destroy the remains of the old renderer
+          game.setRenderer(renderer); // set new renderer
+          game.forceRender(); // show the effect, because game is stopped and so doesn't update the screen
+        });
+        // UI -- end
+
+        tick();
+      };
+      document.addEventListener("DOMContentLoaded", init);
+      //window.addEventListener("load", init);
+
+      class Game {
+        constructor(cols, rows, figures) {
+          this.cols = cols;
+          this.rows = rows;
+
+          this.board = null;
+          this.figures = null;
+          this.renderer = null;
+          this.stats = null;
+
+          this.isStopped = false;
+          this.setFigures(figures);
+
+          this.reset();
+        }
+        setStats(stats) {
+          this.stats = stats;
+        }
+        setRenderer(renderer) {
+          this.renderer = renderer;
+        }
+        setFigures(arrayOfFigures) {
+          this.figures = arrayOfFigures;
+        }
+        createFigure(figureWidth) {
+          let figurePosition = this.board.randomTopPosition(figureWidth);
+          const figure =
+            this.figures[Math.floor(Math.random() * this.figures.length)];
+          return new Figure(figurePosition.x, figurePosition.y, figure);
+        }
+        stop() {
+          this.isStopped = true;
+          this.forceRender();
+        }
+        play() {
+          this.isStopped = false;
+        }
+        reset() {
+          this.board = new Board(this.cols, this.rows);
+          this.activeFigure = this.createFigure(this.figures[0][0].length);
+        }
+        isActive() {
+          return !this.isStopped;
+        }
+        forceRender() {
+          this.renderer.render(this.board, this.activeFigure);
+        }
+        render() {
+          if (!this.isActive()) return;
+
+          this.renderer.render(this.board, this.activeFigure);
+        }
+        moveLeft() {
+          if (this.isActive()) this.activeFigure.moveLeft(this.board);
+        }
+        moveRight() {
+          if (this.isActive()) this.activeFigure.moveRight(this.board);
+        }
+        moveDown() {
+          if (this.isActive()) this.activeFigure.moveDown(this.board);
+        }
+        moveUp() {
+          if (this.isActive()) this.activeFigure.moveUp(this.board);
+        }
+        turnCounterClockWise() {
+          if (this.isActive()) this.activeFigure.turnCCW(this.board);
+        }
+        turnClockWise() {
+          if (this.isActive()) this.activeFigure.turnCW(this.board);
+        }
+        step() {
+          if (!this.isActive()) return;
+          // is top line of the board filled?
+          if (this.board.isTopLineFilled()) {
+            this.stop();
+          }
+        }
+        nextMove() {
+          if (!this.isActive()) return;
+          if (this.activeFigure) {
+            // the figure is about to step down
+            // checks
+            if (!this.activeFigure.moveDown(this.board)) {
+              // save the active figure on the board
+              const removedLines = this.board.addFigure(this.activeFigure);
+              // stats
+              if (this.stats) {
+                this.stats.addFullLine(removedLines);
+                this.stats.addFigure();
+                console.log(this.stats.str);
+              }
+              // add a new figure
+              this.activeFigure = this.createFigure(this.figures[0][0].length);
+            }
+          }
+        }
+      }
+
+      // common classes -- begin
+      class Point {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+        }
+        /**
+         *
+         * @param {Point} point
+         */
+        add(point) {
+          this.x += point.x;
+          this.y += point.y;
+        }
+      }
+
+      class BoardCell {
+        static Empty = 0;
+        static Filled = 1;
+        static Stuck = 7;
+        static Error = 8;
+        static Removed = 9;
+      }
+
+      class Stats {
+        static LINE_COST = 100;
+        static MULTIPLIER = [0, 1, 1.25, 1.5, 2];
+
+        constructor() {
+          this.score = 0;
+          this.figures = 0;
+          this.fullLines = 0;
+        }
+        reset() {
+          this.score = 0;
+          this.figures = 0;
+          this.fullLines = 0;
+        }
+        addScore(v) {
+          this.score += v;
+        }
+        addFigure() {
+          this.figures++;
+        }
+        addFullLine(num) {
+          this.fullLines += num;
+          this.addScore(num * Stats.LINE_COST * Stats.MULTIPLIER[num]);
+        }
+        get str() {
+          return `Score: ${this.score}, Figures: ${this.figures}, Lines: ${this.fullLines}`;
+        }
+      }
+
+      class Board {
+        constructor(cols, rows) {
+          this.width = cols;
+          this.height = rows;
+          this.a = new Array(rows);
+          for (let iy = 0; iy < this.height; iy++) {
+            this.a[iy] = new Array(cols);
+            for (let ix = 0; ix < this.width; ix++)
+              this.set(ix, iy, BoardCell.Empty);
+          }
+        }
+        get(x, y) {
+          if (x < 0 || x >= this.width || y < 0 || y >= this.height)
+            return BoardCell.Empty;
+          return parseInt(this.a[y][x]);
+        }
+        set(x, y, value) {
+          this.a[y][x] = parseInt(value);
+        }
+        get board() {
+          return this.a;
+        }
+        inside(x, y) {
+          return x >= 0 && x < this.width && y >= 0 && y < this.height;
+        }
+        /**
+         *
+         * @param {Figure} figure
+         * @return {Number} the number of removed lines
+         */
+        addFigure(figure) {
+          for (let x = figure.left(); x <= figure.right(); x++) {
+            for (let y = figure.top(); y <= figure.bottom(); y++) {
+              let value = figure.get(x - figure.left(), y - figure.top());
+              if (value > 0) this.set(x, y, value);
+            }
+          }
+          // checks
+          let lines = this.markFullLines();
+          if (lines) this.removeMarkedLines();
+          return lines;
+        }
+        removeMarkedLines() {
+          const board = new Array(this.height);
+          for (let y = 0; y < this.height; y++) {
+            board[y] = new Array(this.width);
+            for (let x = 0; x < this.width; x++) board[y][x] = BoardCell.Empty;
+          }
+          let i = this.height - 1;
+          for (let j = this.height - 1; j >= 0; j--) {
+            if (this.get(0, j) !== BoardCell.Removed) board[i--] = this.a[j];
+          }
+          this.a = board;
+        }
+        _markLineForDelete(lineNumber) {
+          for (let x = 0; x < this.width; x++)
+            this.set(x, lineNumber, BoardCell.Removed);
+        }
+        markFullLines() {
+          let numberOfFullLines = 0;
+          for (let y = this.height - 1; y >= 0; y--) {
+            let isFull = true;
+            for (let x = 0; x < this.width; x++) {
+              if (this.get(x, y) === BoardCell.Empty) {
+                isFull = false;
+                break;
+              }
+            }
+            if (isFull && ++numberOfFullLines) this._markLineForDelete(y);
+          }
+          return numberOfFullLines;
+        }
+        randomTopPosition(widthOfTheFigure) {
+          return new Point(
+            Math.floor(Math.random() * (this.width - widthOfTheFigure - 1)),
+            0
+          );
+        }
+        randomPoint(padding) {
+          padding = padding || 0;
+          return new Point(
+            padding + Math.floor(Math.random() * (this.width - 2 * padding)),
+            padding + Math.floor(Math.random() * (this.height - 2 * padding))
+          );
+        }
+        isTopLineFilled() {
+          for (let x = 0; x < this.width; x++) {
+            if (this.get(x, 0) === BoardCell.Stuck) {
+              return true;
+            }
+          }
+        }
+      }
+
+      class Figure {
+        constructor(x, y, form) {
+          this.x = x;
+          this.y = y;
+          this.form = this.clone(form);
+        }
+        clone(form) {
+          return form.map((el) => (Array.isArray(el) ? this.clone(el) : el));
+        }
+        set(x, y, value) {
+          this.form[y][x] = parseInt(value);
+        }
+        get(x, y) {
+          return parseInt(this.form[y][x]);
+        }
+        width() {
+          return this.form[0].length;
+        }
+        height() {
+          return this.form.length;
+        }
+        left() {
+          return this.x;
+        }
+        right() {
+          return this.left() + this.width() - 1;
+        }
+        top() {
+          return this.y;
+        }
+        bottom() {
+          return this.top() + this.height() - 1;
+        }
+        /**
+         *
+         * @param {Board} board
+         * @param {Point} movement
+         */
+        move(board, movement) {
+          if (!this.intersection(board, movement)) {
+            this.x += movement.x;
+            this.y += movement.y;
+            return true;
+          }
+          return false;
+        }
+        /**
+         *
+         * @param {Board} board
+         * @param {Point} movement
+         */
+        intersection(board, movement) {
+          let nx = this.left() + movement.x;
+          let ny = this.top() + movement.y;
+          for (let x = 0; x < this.width(); x++) {
+            for (let y = 0; y < this.height(); y++) {
+              if (this.get(x, y) === BoardCell.Empty) continue;
+              if (this.bottom() + movement.y >= board.height)
+                return this.stuck();
+              if (!board.inside(nx + x, ny + y)) return true;
+              if (board.get(nx + x, ny + y) !== BoardCell.Empty)
+                return this.stuck();
+            }
+          }
+          return false;
+        }
+        stuck() {
+          for (let x = 0; x < this.width(); x++) {
+            for (let y = 0; y < this.height(); y++) {
+              this.form[y][x] =
+                this.form[y][x] !== BoardCell.Empty
+                  ? BoardCell.Stuck
+                  : BoardCell.Empty;
+            }
+          }
+          return true;
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        moveLeft(board) {
+          return this.move(board, new Point(-1, 0));
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        moveRight(board) {
+          return this.move(board, new Point(+1, 0));
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        moveUp(board) {
+          return this.move(board, new Point(0, -1));
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        moveDown(board) {
+          return this.move(board, new Point(0, +1));
+        }
+        /**
+         *
+         * @param {Board} board
+         * @param {Array} form
+         */
+        putFigureInsideBoard(board, form) {
+          const figure = new Figure(this.x, this.y, form);
+          if (figure.left() + figure.width() > board.width) {
+            this.x -= figure.left() + figure.width() - board.width;
+          }
+          if (figure.left() < 0) {
+            this.x -= figure.left();
+          }
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        turnCW(board) {
+          const form = new Array(this.width());
+          for (let x = 0; x < this.width(); x++)
+            form[x] = new Array(this.height()).fill(BoardCell.Empty);
+
+          for (let x = 0; x < this.width(); x++)
+            for (let y = 0; y < this.height(); y++)
+              form[x][this.height() - y - 1] = this.form[y][x];
+
+          this.putFigureInsideBoard(board, form);
+          this.form = form;
+        }
+        /**
+         *
+         * @param {Board} board
+         */
+        turnCCW() {
+          const form = new Array(this.width());
+          for (let x = 0; x < this.width(); x++)
+            form[x] = new Array(this.height()).fill(BoardCell.Empty);
+
+          for (let x = 0; x < this.width(); x++)
+            for (let y = 0; y < this.height(); y++)
+              form[this.width() - x - 1][y] = this.form[y][x];
+
+          this.putFigureInsideBoard(board, form);
+          this.form = form;
+        }
+      }
+
+      // common classes -- end
+
+      // renderers -- begin
+      class Three3DRenderer {
+        /**
+         *
+         * @param {HTMLElement} containerElement
+         */
+        constructor(containerElement) {
+          this.container = containerElement;
+          this.width = this.container.clientWidth;
+          this.height = this.container.clientHeight;
+          this.scene = new THREE.Scene();
+
+          this.camera = new THREE.PerspectiveCamera(
+            60, // FOV
+            this.width / this.height, // aspect ratio
+            0.1, // near
+            50 // far
+          );
+          this.renderer = new THREE.WebGLRenderer();
+          this.renderer.setSize(this.width, this.height);
+          this.renderer.shadowMap.enabled = true;
+          this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+          this.renderer.domElement.style.position = "absolute";
+          this.renderer.domElement.style.left = 0;
+          this.renderer.domElement.style.top = 0;
+
+          this.container.appendChild(this.renderer.domElement);
+
+          // fullscreen mode -- begin
+          this.fullscreenFn = (e) => {
+            const fullscreenElement =
+              document.fullscreenElement || document.webkitFullscreenElement;
+            const requestFullscreen = () =>
+              this.renderer.domElement.requestFullscreen
+                ? this.renderer.domElement.requestFullscreen()
+                : this.renderer.domElement.webkitRequestFullscreen();
+            const exitFullscreen = () =>
+              document.exitFullscreen
+                ? document.exitFullscreen()
+                : document.webkitExitFullscreen();
+            if (!fullscreenElement) requestFullscreen();
+            else exitFullscreen();
+          };
+          this.renderer.domElement.addEventListener(
+            "dblclick",
+            this.fullscreenFn
+          );
+          // fullscreen mode -- end
+
+          const planeGeometry = new THREE.PlaneGeometry(1, 1);
+          const planeMaterial = new THREE.MeshStandardMaterial({
+            color: 0xb3b593,
+            side: THREE.DoubleSide,
+          });
+          this.plane = new THREE.Mesh(planeGeometry, planeMaterial);
+          this.scene.add(this.plane);
+
+          const floorGeometry = new THREE.PlaneGeometry(50, 50);
+          const floorMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide,
+          });
+          this.floor = new THREE.Mesh(floorGeometry, floorMaterial);
+          this.scene.add(this.floor);
+          this.floor.rotation.set(Math.PI * 0.5, 0, 0);
+          this.ceiling = new THREE.Mesh(floorGeometry, floorMaterial);
+          this.scene.add(this.ceiling);
+          this.ceiling.rotation.set(Math.PI * 0.5, 0, 0);
+
+          this.wallLeft = new THREE.Mesh(floorGeometry, floorMaterial);
+          this.scene.add(this.wallLeft);
+          this.wallLeft.rotation.set(0, Math.PI * 0.5, 0);
+          this.wallRight = new THREE.Mesh(floorGeometry, floorMaterial);
+          this.scene.add(this.wallRight);
+          this.wallRight.rotation.set(0, Math.PI * 0.5, 0);
+
+          this.camera.position.z = -27;
+          this.camera.position.y = 0;
+          this.camera.lookAt(0, 0, 0);
+          this.camera.rotation.z = Math.PI * 0;
+
+          const createLight = (color, intensity, position, shadow = true) => {
+            const light = new THREE.PointLight(color, intensity, 50);
+            light.position.set(...position);
+            if (shadow) {
+              light.castShadow = true;
+              light.shadow.mapSize.width = 256;
+              light.shadow.mapSize.height = 256;
+              light.shadow.camera.near = 0.5;
+              light.shadow.camera.far = 40;
+            }
+            return light;
+          };
+
+          this.pointLight = createLight(0xffffff, 0.85, [0, -10, -5], true);
+          this.scene.add(this.pointLight);
+
+          const pointLightIntensity = 0.35;
+          this.scene.add(
+            createLight(0xffffff, pointLightIntensity, [20, 20, -10], false)
+          );
+          this.scene.add(
+            createLight(0xffffff, pointLightIntensity, [-20, 20, -10], false)
+          );
+          this.scene.add(
+            createLight(0xffffff, pointLightIntensity, [-20, -20, -10], false)
+          );
+          this.scene.add(
+            createLight(0xffffff, pointLightIntensity, [20, -20, -10], false)
+          );
+
+          this.group = null;
+        }
+        destroy() {
+          this.renderer.domElement.removeEventListener(
+            "dblclick",
+            this.fullscreenFn
+          );
+          this.renderer.domElement.remove();
+        }
+
+        clear() {}
+        /**
+         *
+         * @param {Board} board
+         * @param {Figure} figure
+         */
+        render(board, figure) {
+          // board
+          const materialDefault = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+          });
+          const padding = 0.16;
+          const shiftLeft = -(board.width / 2) + 0.5;
+          const shiftTop = -(board.height / 2) + 0.5;
+
+          this.plane.scale.x = board.width + 2;
+          this.plane.scale.y = board.height + 10;
+          this.floor.position.set(0, board.height / 2, 0);
+          this.ceiling.position.set(0, -board.height / 2, 0);
+          this.wallLeft.position.set(-board.width / 2, 0, 0);
+          this.wallRight.position.set(board.width / 2, 0, 0);
+
+          if (!this.group) {
+            const geometry = new THREE.BoxGeometry(
+              1 - padding,
+              1 - padding,
+              1 - padding
+            );
+
+            this.group = new Array(board.height);
+            for (let j = 0; j < board.height; j++) {
+              this.group[j] = new Array(board.width);
+              for (let i = 0; i < board.width; i++) {
+                this.group[j][i] = new THREE.Mesh(geometry, materialDefault);
+                this.scene.add(this.group[j][i]);
+              }
+            }
+          }
+
+          const materialEmpty = new THREE.MeshStandardMaterial({
+            color: 0xffffff, //0xebddb7
+          });
+          const materialStuck = new THREE.MeshStandardMaterial({
+            color: 0x00ff1a,
+            emissive: 0x00ff1a,
+            emissiveIntensity: 0.5,
+          });
+          const materialFilled = new THREE.MeshStandardMaterial({
+            color: 0xf20707,
+            emissive: 0xf20707,
+            emissiveIntensity: 0.5,
+          });
+
+          for (let y = 0; y < board.height; y++) {
+            for (let x = 0; x < board.width; x++) {
+              let value = board.get(x, y);
+              let left = x + shiftLeft;
+              let top = y + shiftTop;
+
+              let material = null;
+              let z = 0.35;
+
+              if (
+                figure &&
+                x >= figure.left() &&
+                x <= figure.right() &&
+                y >= figure.top() &&
+                y <= figure.bottom() &&
+                figure.get(x - figure.left(), y - figure.top()) >
+                  BoardCell.Empty
+              ) {
+                value = figure.get(x - figure.left(), y - figure.top());
+                material = materialFilled;
+                z = -1.0;
+              } else {
+                let className = "";
+                switch (value) {
+                  case BoardCell.Empty:
+                    material = materialEmpty;
+                    break;
+                  case BoardCell.Filled:
+                    material = materialFilled;
+                    z = -1.0;
+                    break;
+                  case BoardCell.Error:
+                    material = materialDefault;
+                    break;
+                  case BoardCell.Stuck:
+                    material = materialStuck;
+                    z = -1.0;
+                    break;
+                  default:
+                    material = materialDefault;
+                    break;
+                }
+              }
+              this.group[y][x].material = material;
+              this.group[y][x].position.x = left;
+              this.group[y][x].position.y = top;
+              this.group[y][x].position.z = z;
+            }
+          }
+
+          this.renderer.render(this.scene, this.camera);
+        }
+      }
+      const FIGURES_ARRAY = [
+        [
+          // Cube
+          [1, 1],
+          [1, 1],
+        ],
+        [
+          // Cube (x2) - because we need MORE cubes!
+          [1, 1],
+          [1, 1],
+        ],
+        [
+          // Line Vertical
+          [1],
+          [1],
+          [1],
+          [1],
+        ],
+        [
+          // Line Horizontal
+          [1, 1, 1, 1],
+        ],
+        [
+          // Corner Left
+          [1, 0],
+          [1, 0],
+          [1, 1],
+        ],
+        [
+          // Corner Right
+          [0, 1],
+          [0, 1],
+          [1, 1],
+        ],
+        [
+          [0, 1, 0],
+          [1, 1, 1],
+        ],
+
+        [
+          [0, 1],
+          [1, 1],
+          [1, 0],
+        ],
+        [
+          [1, 0],
+          [1, 1],
+          [0, 1],
+        ],
+      ];
+    </script>
+  </head>
+  <body>
+    <a class="s-panel">
+      <div
+        class="board"
+        id="board"
+        title="Double click to go to fullscreen mode"
+      ></div>
+      <div class="s-ui">
+        <button name="gamestart">Start</button
+        ><button name="gamestop">Stop</button
+        ><button name="gamereset">Reset</button
+        ><button name="statsreset">Reset Stats</button
+        ><select name="renderer">
+          <option value="TextRenderer">Text Renderer</option>
+          <option value="Canvas2DRenderer">Canvas 2D Renderer</option>
+          <option value="Three3DRenderer" selected="selected">
+            3D Renderer
+          </option>
+        </select>
+        <div class="stats" id="stats"></div>
+      </div>
+    </a>
+    <!-- We run the WebGL code at the end to be sure that the document is loaded.
+  -->
+    <script>
+      init();
+      run();
+    </script>
+  </body>
+</html>
